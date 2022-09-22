@@ -34,7 +34,7 @@ func sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(emailBody.EmailTo) == 0 || emailBody.EmailBody == "" {
+	if len(emailBody.EmailTo) == 0 || emailBody.EmailBody == "" || len(emailBody.EmailSubject) == 0 {
 		respondWithError(w, http.StatusBadGateway, "Please enter emailTo and email body")
 		return
 	}
@@ -45,6 +45,28 @@ func sendEmail(w http.ResponseWriter, r *http.Request) {
 		respondWithJson(w, http.StatusAccepted, map[string]string{
 			"message": result,
 		})
+	}
+}
+
+func searchFilter(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	if r.Method != "POST" {
+		respondWithError(w, http.StatusBadRequest, "Invalid method")
+		return
+	}
+
+	var search pojo.Search
+
+	if err := json.NewDecoder(r.Body).Decode(&search); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("%v", err))
+		return
+	}
+
+	if result, err := con.SearchFilter(search); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("%v", err))
+	} else {
+		respondWithJson(w, http.StatusAccepted, result)
 	}
 }
 
@@ -61,6 +83,7 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 
 func main() {
 	http.HandleFunc("/send-email", sendEmail)
+	http.HandleFunc("/search", searchFilter)
 	fmt.Println("Service Started at 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

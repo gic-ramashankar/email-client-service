@@ -2,7 +2,10 @@ module demo
 
 go 1.19
 
-require go.mongodb.org/mongo-driver v1.10.2
+require (
+	go.mongodb.org/mongo-driver v1.10.2
+	gopkg.in/mail.v2 v2.3.1
+)
 
 require (
 	github.com/golang/snappy v0.0.1 // indirect
@@ -17,5 +20,4 @@ require (
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect
 	golang.org/x/text v0.3.7 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
-	gopkg.in/mail.v2 v2.3.1 // indirect
 )
