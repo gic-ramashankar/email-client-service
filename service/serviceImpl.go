@@ -8,9 +8,13 @@ import (
 	"fmt"
 	"log"
 	"net/smtp"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/unidoc/unipdf/v3/common/license"
+	"github.com/unidoc/unipdf/v3/creator"
+	"github.com/unidoc/unipdf/v3/model"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -39,26 +43,47 @@ func (e *Connection) Connect() {
 		log.Fatal(err)
 	}
 
+	err = license.SetMeteredKey("72c4ab06d023bbc8b2e186d089f9e052654afea32b75141f39c7dc1ab3b108ca")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	Collection = client.Database(e.Database).Collection(e.Collection)
 }
 
-func (e *Connection) SendEmail(emailData pojo.EmailPojo) (string, error) {
+func (e *Connection) SendEmail(emailData pojo.EmailModel) (string, error) {
 
-	err := sendMail2(emailData)
+	//	err := sendMail2(emailData)
+	err := sendMailWithAttachment(emailData)
 
 	if err != nil {
 		return "", err
 	}
 
 	fmt.Println("Email Sent")
-	emailData.Date = time.Now()
-
-	_, err = Collection.InsertOne(ctx, emailData)
-
-	if err != nil {
-		return "", errors.New("Unable To Insert New Record")
+	shouldReturn := e.newMethod(emailData)
+	if shouldReturn != nil {
+		return "", shouldReturn
 	}
 	return "Email Sent Successfully", nil
+}
+
+func (*Connection) newMethod(emailData pojo.EmailModel) error {
+
+	var emailSave pojo.EmailPojo
+	emailSave.EmailTo = emailData.EmailTo
+	emailSave.EmailBCC = emailData.EmailBCC
+	emailSave.EmailCC = emailData.EmailCC
+	emailSave.EmailSubject = emailData.EmailSubject
+	emailSave.EmailBody = emailData.EmailBody
+	emailSave.Date = time.Now()
+
+	_, err := Collection.InsertOne(ctx, emailSave)
+
+	if err != nil {
+		return errors.New("Unable To Insert New Record")
+	}
+	return err
 }
 
 func mail(emailData pojo.EmailPojo) error {
@@ -103,7 +128,8 @@ func sendMail2(emailData pojo.EmailPojo) error {
 		"Cc":      emailData.EmailCC,
 		"Subject": emailData.EmailSubject,
 	})
-
+	//Directory and fileName
+	//	m.Attach("data/download/searchResult2_57_44_pm.pdf")
 	m.SetBody("text/plain", emailData.EmailBody)
 	// Settings for SMTP server
 	d := gomail.NewDialer("smtp-relay.sendinblue.com", 587, "ramashankar.kumar@gridinfocom.com", "vrDYSBXaFb2y6VnE")
@@ -161,4 +187,178 @@ func (e *Connection) SearchFilter(search pojo.Search) ([]*pojo.EmailPojo, error)
 	}
 
 	return searchData, nil
+}
+
+func (e *Connection) SearchByEmailId(emailId string) (string, error) {
+	var searchResult []*pojo.EmailPojo
+	os.MkdirAll("data/download", os.ModePerm)
+	dir := "data/download/"
+	file := "searchResult" + fmt.Sprintf("%v", time.Now().Format("3_4_5_pm"))
+
+	id, err := primitive.ObjectIDFromHex(emailId)
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+	filter := bson.D{}
+
+	filter = append(filter, primitive.E{Key: "_id", Value: id})
+	cur, err := Collection.Find(ctx, filter)
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+	for cur.Next(ctx) {
+		var data pojo.EmailPojo
+		err = cur.Decode(&data)
+		if err != nil {
+			fmt.Println(err)
+			return "", err
+		}
+		searchResult = append(searchResult, &data)
+	}
+
+	log.Println("Pdf")
+	_, errPdf := writeDataIntoPDFTable(dir, file, searchResult)
+	if errPdf != nil {
+		fmt.Println(errPdf)
+		return "", err
+	}
+	// dataty, err2 := ioutil.ReadFile(dir + file + ".pdf")
+	// fmt.Println("Data length", len(dataty))
+	// if err2 != nil {
+	// 	return "", err
+	// }
+	return "PDF Saved Successfully Having File name: " + file, nil
+}
+
+func writeDataIntoPDFTable(dir, file string, data []*pojo.EmailPojo) (*creator.Creator, error) {
+
+	c := creator.New()
+	c.SetPageMargins(20, 20, 20, 20)
+
+	font, err := model.NewStandard14Font(model.HelveticaName)
+	if err != nil {
+		return c, err
+	}
+
+	// Bold font
+	fontBold, err := model.NewStandard14Font(model.HelveticaBoldName)
+	if err != nil {
+		return c, err
+	}
+
+	// Generate basic usage chapter.
+	if err := basicUsage(c, font, fontBold, data); err != nil {
+		return c, err
+	}
+
+	err = c.WriteToFile(dir + file + ".pdf")
+	if err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+func basicUsage(c *creator.Creator, font, fontBold *model.PdfFont, data []*pojo.EmailPojo) error {
+	// Create chapter.
+	ch := c.NewChapter("Search Data")
+	ch.SetMargins(0, 0, 10, 0)
+	ch.GetHeading().SetFont(font)
+	ch.GetHeading().SetFontSize(20)
+	ch.GetHeading().SetColor(creator.ColorRGBFrom8bit(72, 86, 95))
+
+	contentAlignH(c, ch, font, fontBold, data)
+
+	// Draw chapter.
+	if err := c.Draw(ch); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func contentAlignH(c *creator.Creator, ch *creator.Chapter, font, fontBold *model.PdfFont, data []*pojo.EmailPojo) {
+
+	//	normalFontColor := creator.ColorRGBFrom8bit(72, 86, 95)
+	normalFontColorGreen := creator.ColorRGBFrom8bit(4, 79, 3)
+	normalFontSize := 10.0
+	for i := range data {
+		// p := c.NewParagraph("Id" + " :     " + data[i].ID.String())
+		// p.SetFont(font)
+		// p.SetFontSize(normalFontSize)
+		// p.SetColor(normalFontColorGreen)
+		// p.SetMargins(0, 0, 10, 0)
+		// ch.Add(p)
+		x := c.NewParagraph("To" + " :     " + convertArrayOfStringIntoString(data[i].EmailTo))
+		x.SetFont(font)
+		x.SetFontSize(normalFontSize)
+		x.SetColor(normalFontColorGreen)
+		x.SetMargins(0, 0, 10, 0)
+		ch.Add(x)
+		y := c.NewParagraph("Cc" + " :     " + convertArrayOfStringIntoString(data[i].EmailCC))
+		y.SetFont(font)
+		y.SetFontSize(normalFontSize)
+		y.SetColor(normalFontColorGreen)
+		y.SetMargins(0, 0, 10, 0)
+		ch.Add(y)
+		z := c.NewParagraph("Bcc" + " :     " + convertArrayOfStringIntoString(data[i].EmailBCC))
+		z.SetFont(font)
+		z.SetFontSize(normalFontSize)
+		z.SetColor(normalFontColorGreen)
+		z.SetMargins(0, 0, 10, 0)
+		ch.Add(z)
+		b := c.NewParagraph(convertArrayOfStringIntoString(data[i].EmailSubject))
+		b.SetFont(font)
+		b.SetFontSize(normalFontSize)
+		b.SetColor(normalFontColorGreen)
+		b.SetMargins(0, 0, 10, 0)
+		ch.Add(b)
+		a := c.NewParagraph(data[i].EmailBody)
+		a.SetFont(font)
+		a.SetFontSize(normalFontSize)
+		a.SetColor(normalFontColorGreen)
+		a.SetMargins(0, 0, 10, 0)
+		a.SetLineHeight(2)
+		//	a.SetTextAlignment(creator.TextAlignmentJustify)
+		ch.Add(a)
+	}
+}
+
+func convertArrayOfStringIntoString(str []string) string {
+	finalData := ""
+	y := 0
+	for x := range str {
+		if y != 0 {
+			finalData = finalData + ", "
+		}
+		finalData = finalData + str[x]
+		y++
+	}
+	y = 0
+	return finalData
+}
+
+func sendMailWithAttachment(emailData pojo.EmailModel) error {
+	m := gomail.NewMessage()
+	m.SetHeaders(map[string][]string{
+		"From":    {m.FormatAddress("ramashankar.kumar@gridinfocom.com", "Ramashankar")},
+		"To":      emailData.EmailTo,
+		"Cc":      emailData.EmailCC,
+		"Subject": emailData.EmailSubject,
+	})
+	for i := range emailData.FileLocation {
+		m.Attach(emailData.FileLocation[i])
+	}
+	m.SetBody("text/plain", emailData.EmailBody)
+	// Settings for SMTP server
+	d := gomail.NewDialer("smtp-relay.sendinblue.com", 587, "ramashankar.kumar@gridinfocom.com", "vrDYSBXaFb2y6VnE")
+
+	d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	// Now send E-Mail
+	if err := d.DialAndSend(m); err != nil {
+		fmt.Println(err)
+		return err
+	}
+	return nil
 }

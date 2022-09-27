@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 var con = service.Connection{}
@@ -27,7 +28,7 @@ func sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var emailBody pojo.EmailPojo
+	var emailBody pojo.EmailModel
 
 	if err := json.NewDecoder(r.Body).Decode(&emailBody); err != nil {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("%v", err))
@@ -70,6 +71,24 @@ func searchFilter(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func search(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	if r.Method != "GET" {
+		respondWithError(w, http.StatusBadRequest, "Invalid method")
+		return
+	}
+
+	path := r.URL.Path
+	segments := strings.Split(path, "/")
+	id := segments[len(segments)-1]
+
+	if result, err := con.SearchByEmailId(id); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("%v", err))
+	} else {
+		respondWithJson(w, http.StatusAccepted, result)
+	}
+}
+
 func respondWithJson(w http.ResponseWriter, code int, payload interface{}) {
 	response, _ := json.Marshal(payload)
 	w.Header().Set("Content-Type", "application/json")
@@ -84,6 +103,7 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 func main() {
 	http.HandleFunc("/send-email", sendEmail)
 	http.HandleFunc("/search", searchFilter)
+	http.HandleFunc("/search-by-emailId/", search)
 	fmt.Println("Service Started at 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
