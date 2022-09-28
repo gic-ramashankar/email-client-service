@@ -6,7 +6,9 @@ import (
 	"demo/pojo"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
 	"os"
 	"time"
 
@@ -26,6 +28,10 @@ type Connection struct {
 	Collection string
 }
 
+const maxUploadSize = 10 * 1024 * 1024 // 10 mb
+const dir = "data/download/"
+
+var fileName string
 var Collection *mongo.Collection
 var ctx = context.TODO()
 
@@ -58,14 +64,14 @@ func (e *Connection) SendEmail(emailData pojo.EmailModel) (string, error) {
 	}
 
 	fmt.Println("Email Sent")
-	shouldReturn := e.newMethod(emailData)
+	shouldReturn := e.saveMethod(emailData)
 	if shouldReturn != nil {
 		return "", shouldReturn
 	}
 	return "Email Sent Successfully", nil
 }
 
-func (*Connection) newMethod(emailData pojo.EmailModel) error {
+func (*Connection) saveMethod(emailData pojo.EmailModel) error {
 
 	var emailSave pojo.EmailPojo
 	emailSave.EmailTo = emailData.EmailTo
@@ -301,4 +307,88 @@ func sendMailWithAttachment(emailData pojo.EmailModel) error {
 		return err
 	}
 	return nil
+}
+
+func (e *Connection) SendEmailAttachMent(emailPojo pojo.EmailPojo, files []*multipart.FileHeader) (string, error) {
+
+	arrayfiles, err := uploadFiles(files)
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Println("Files:", arrayfiles)
+	emailModel := setValueInEmailModel(emailPojo, arrayfiles)
+	fmt.Println("EmailModel:", emailModel)
+	err = sendMailWithAttachment(emailModel)
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Println("Email Sent")
+	emailPojo.Date = time.Now()
+	_, err = Collection.InsertOne(ctx, emailPojo)
+
+	if err != nil {
+		return "", errors.New("Unable To Insert New Record")
+	}
+	return "Email Sent Successfully", nil
+}
+
+func uploadFiles(files []*multipart.FileHeader) ([]string, error) {
+	var fileNames []string
+	for _, fileHeader := range files {
+		fileName = fileHeader.Filename
+		fileNames = append(fileNames, dir+fileName)
+		if fileHeader.Size > maxUploadSize {
+			return fileNames, errors.New("The uploaded image is too big: %s. Please use an image less than 1MB in size: " + fileHeader.Filename)
+		}
+
+		// Open the file
+		file, err := fileHeader.Open()
+		if err != nil {
+			return fileNames, err
+		}
+
+		defer file.Close()
+
+		buff := make([]byte, 512)
+		_, err = file.Read(buff)
+		if err != nil {
+			return fileNames, err
+		}
+
+		_, err = file.Seek(0, io.SeekStart)
+		if err != nil {
+			return fileNames, err
+		}
+
+		err = os.MkdirAll(dir, os.ModePerm)
+		if err != nil {
+			return fileNames, err
+		}
+
+		f, err := os.Create(dir + fileHeader.Filename)
+		if err != nil {
+			return fileNames, err
+		}
+
+		defer f.Close()
+
+		_, err = io.Copy(f, file)
+		if err != nil {
+			return fileNames, err
+		}
+	}
+	return fileNames, nil
+}
+
+func setValueInEmailModel(emailPojo pojo.EmailPojo, arrayFiles []string) pojo.EmailModel {
+	var emailModel pojo.EmailModel
+	emailModel.EmailTo = emailPojo.EmailTo
+	emailModel.EmailCC = emailPojo.EmailCC
+	emailModel.EmailBCC = emailPojo.EmailBCC
+	emailModel.EmailSubject = emailPojo.EmailSubject
+	emailModel.EmailBody = emailPojo.EmailBody
+	emailModel.FileLocation = arrayFiles
+	return emailModel
 }

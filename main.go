@@ -49,6 +49,43 @@ func sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func sendEmailAttach(w http.ResponseWriter, r *http.Request) {
+	//	defer r.Body.Close()
+
+	if r.Method != "POST" {
+		respondWithError(w, http.StatusBadRequest, "Invalid method")
+		return
+	}
+	fmt.Println("Request")
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, "The uploaded file is too big. Please choose an file that's less than 1MB in size", http.StatusBadRequest)
+		return
+
+	}
+	files := r.MultipartForm.File["file"]
+	body := r.MultipartForm.Value["request"][0]
+
+	var emailBody pojo.EmailPojo
+	err := json.Unmarshal([]byte(body), &emailBody)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("%v", err))
+		return
+	}
+
+	if len(emailBody.EmailTo) == 0 || emailBody.EmailBody == "" || len(emailBody.EmailSubject) == 0 {
+		respondWithError(w, http.StatusBadGateway, "Please enter emailTo, email body and emailSubject")
+		return
+	}
+	fmt.Println("Email:", emailBody)
+	if result, err := con.SendEmailAttachMent(emailBody, files); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("%v", err))
+	} else {
+		respondWithJson(w, http.StatusAccepted, map[string]string{
+			"message": result,
+		})
+	}
+}
+
 func searchFilter(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
@@ -101,7 +138,8 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 }
 
 func main() {
-	http.HandleFunc("/send-email", sendEmail)
+	http.HandleFunc("/send-email-fileLocation", sendEmail)
+	http.HandleFunc("/send-email-formData", sendEmailAttach)
 	http.HandleFunc("/search", searchFilter)
 	http.HandleFunc("/search-by-emailId/", search)
 	fmt.Println("Service Started at 8080")
